@@ -1,0 +1,217 @@
+package rolego
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+)
+
+// Checker — ролевая авторизация по битовым маскам: экстрактор звеньев ресурса
+// (MapScopes) → роли субъекта на звеньях (Resolver) → комбинация масок по оси
+// (ScopeChain) → проверка права по матрице (Matrices).
+type Checker[S, R any] struct {
+	kind      Kind
+	mapScopes func(R) []Scope
+	resolver  Resolver[S, R]
+	mats      Matrices
+	chain     ScopeChain
+}
+
+// Option — опция сборки Checker через New; каждая опция записывает одно поле
+// конфигурации. Повторный вызов одной и той же опции перезаписывает значение
+// (последний вызов побеждает).
+type Option[S, R any] func(*config[S, R]) error
+
+// config — состояние сборки Checker, передаваемое опциям.
+type config[S, R any] struct {
+	kind      Kind
+	mapScopes func(R) []Scope
+	resolver  Resolver[S, R]
+	mats      Matrices
+	chain     ScopeChain
+}
+
+// New собирает Checker, применяя опции слева направо; при ошибке любой опции
+// возвращает nil и эту ошибку. nil-опция в списке молча пропускается. Валидация
+// политики (полнота матриц, ось, nil резолвер/экстрактор) выполняется на Этапе 6
+// в Validate, здесь не проводится.
+func New[S, R any](opts ...Option[S, R]) (*Checker[S, R], error) {
+	var cfg config[S, R]
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(&cfg); err != nil {
+			return nil, err
+		}
+	}
+	return &Checker[S, R]{
+		kind:      cfg.kind,
+		mapScopes: cfg.mapScopes,
+		resolver:  cfg.resolver,
+		mats:      cfg.mats,
+		chain:     cfg.chain,
+	}, nil
+}
+
+// Type задаёт Kind ресурса: итоговая маска проверяется по матрице именно этого
+// Kind; повторный вызов перезаписывает Kind.
+func Type[S, R any](kind Kind) Option[S, R] {
+	return func(c *config[S, R]) error {
+		c.kind = kind
+		return nil
+	}
+}
+
+// MapScopes задаёт экстрактор звеньев ресурса (Вариант A): res → звенья от корня
+// к самому ресурсу; повторный вызов перезаписывает экстрактор.
+func MapScopes[S, R any](f func(R) []Scope) Option[S, R] {
+	return func(c *config[S, R]) error {
+		c.mapScopes = f
+		return nil
+	}
+}
+
+// Resolve задаёт резолвер ролей субъекта; повторный вызов перезаписывает резолвер.
+func Resolve[S, R any](r Resolver[S, R]) Option[S, R] {
+	return func(c *config[S, R]) error {
+		c.resolver = r
+		return nil
+	}
+}
+
+// WithPolicy задаёт матрицы прав и ось цепочки как единую политику; повторный
+// вызов перезаписывает и матрицы, и ось. mats хранится по ссылке без копии:
+// мутация карты после New при одновременном Check — гонка по данным.
+//
+// Имя отличается от Policy-интерфейса (policy.go): одноимённые тип и функция в
+// пакете несовместимы.
+func WithPolicy[S, R any](mats Matrices, chain ScopeChain) Option[S, R] {
+	return func(c *config[S, R]) error {
+		c.mats = mats
+		c.chain = chain
+		return nil
+	}
+}
+
+// Check проверяет право perm субъекта subj на ресурс res:
+// MapScopes → звенья, RolesAt на каждом звене (от самого глубокого к корню) →
+// маски, combine по правилу оси → итоговая маска, mats[kind].Allow — решение.
+// perm == 0 — (Deny, ErrZeroPerm); нет звеньев или пустая итоговая маска — Deny;
+// ошибка резолвера — (Deny, err).
+func (c *Checker[S, R]) Check(ctx context.Context, subj S, res R, perm Perm) (Decision, error) {
+	if perm == 0 {
+		return Deny, fmt.Errorf("%w: %d", ErrZeroPerm, perm)
+	}
+
+	scopes := c.mapScopes(res)
+	if len(scopes) == 0 {
+		return Deny, nil
+	}
+
+	// Звенья от MapScopes идут от корня (индекс 0) к самому ресурсу (последний).
+	// depth — позиция звена в оси, где 0 у самого глубокого (ресурса). Маски
+	// укладываем по индексу depth, так что masks[0] — маска ресурса: это соглашение
+	// принимает combine (индекс 0 — самое глубокое звено). Идём от ресурса к корню.
+	masks := make([]Roles, len(scopes))
+	for j := len(scopes) - 1; j >= 0; j-- {
+		scope := scopes[j]
+		depth := len(scopes) - 1 - j
+		roles, err := c.resolver.RolesAt(ctx, subj, Link{Scope: scope, Kind: scope.Kind, Depth: depth})
+		if err != nil {
+			return Deny, err
+		}
+		masks[depth] = roles
+	}
+
+	merged, ok := combine(c.chain.Rule(), masks)
+	if !ok {
+		return Deny, nil
+	}
+
+	if c.mats[c.kind].Allow(merged, perm) {
+		return Allow, nil
+	}
+	return Deny, nil
+}
+
+// Validate проверяет целостность политики: матрица для c.kind
+// (ErrNoMatrixForKind), непустая ось (ErrEmptyChain), валидное правило
+// комбинации (ErrInvalidChainRule), не-nil резолвер (ErrNilResolver) и экстрактор
+// (ErrNilMapScopes). Противоречия собираются все сразу и возвращаются одним
+// errors.Join — каждый компонент своя sentinel-ошибка, поэтому сверяются через
+// errors.Is. При отсутствии противоречий — nil.
+func (c *Checker[S, R]) Validate() error {
+	var errs []error
+	if _, ok := c.mats[c.kind]; !ok {
+		errs = append(errs, ErrNoMatrixForKind)
+	}
+	if len(c.chain.kinds) == 0 {
+		errs = append(errs, ErrEmptyChain)
+	}
+	if c.chain.rule > Union {
+		errs = append(errs, ErrInvalidChainRule)
+	}
+	if nilValue(c.resolver) {
+		errs = append(errs, ErrNilResolver)
+	}
+	if nilValue(c.mapScopes) {
+		errs = append(errs, ErrNilMapScopes)
+	}
+	return errors.Join(errs...)
+}
+
+// WhoCan возвращает тех из candidates, кто имеет право perm на ресурсе res:
+// для каждого кандидата выполняется Check; при Allow кандидат попадает в
+// результат. Порядок результата повторяет candidates (дубликат-кандидат даёт
+// дубликат в результате). При ошибке Check на любом кандидате возвращается
+// (nil, err) — частичный результат не отдаётся.
+//
+// Ограничение контракта: WhoCan разворачивает только субъект-детерминированную
+// часть политики. Правила, где право зависит ещё и от ресурса/времени
+// (например, «открыть можно, пока дверь не заблокирована менеджером»),
+// разворачиваются WhoCan неточно — финальную выборку после WhoCan делает
+// вызывающий.
+func (c *Checker[S, R]) WhoCan(ctx context.Context, candidates []S, res R, perm Perm) ([]S, error) {
+	allowed := make([]S, 0, len(candidates))
+	for _, cand := range candidates {
+		dec, err := c.Check(ctx, cand, res, perm)
+		if err != nil {
+			return nil, err
+		}
+		if dec.Allow() {
+			allowed = append(allowed, cand)
+		}
+	}
+	return allowed, nil
+}
+
+// nilValue сообщает, является ли v «настоящим» nil, на котором вызов упадёт:
+// nil-интерфейс, типизированный nil-указатель или nil-функция. Значения, чьё
+// нулевое состояние безопасно для чтения (например, nil-мапа карты-резолвера:
+// чтение по ключу вернёт нулевое значение, а не упадёт), nil-значением не
+// считаются — обычная проверка v == nil их и так пропускает.
+func nilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Ptr:
+		return rv.IsNil()
+	}
+	return false
+}
+
+// Allows — bool-обёртка над Check для коротких вызовов: true тогда и только тогда,
+// когда правая проверка вернула Allow без ошибки. Ошибка (включая ErrZeroPerm)
+// трактуется как Deny и даёт false — для случаев, где важна причина отказа,
+// используйте Check напрямую.
+func (c *Checker[S, R]) Allows(ctx context.Context, subj S, res R, perm Perm) bool {
+	dec, err := c.Check(ctx, subj, res, perm)
+	if err != nil {
+		return false
+	}
+	return dec.Allow()
+}
