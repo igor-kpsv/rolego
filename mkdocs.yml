@@ -1,0 +1,58 @@
+site_name: rolego
+site_description: Ролевая авторизация на битовых масках для Go — сценарии использования
+site_url: https://igor-kpsv.github.io/rolego/
+repo_url: https://github.com/igor-kpsv/rolego
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.integrate
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-4
+        name: Переключить на тёмную тему
+
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-7
+        name: Переключить на светлую тему
+
+nav:
+  - Главная: index.md
+  - Быстрый старт: quickstart.md
+  - Роли и права: roles.md
+  - Сценарии:
+      - Проверка права (Check): check.md
+      - Кто имеет право (WhoCan): who-can.md
+      - Скоупы и цепочки: scopes.md
+      - Комбинирование политик: policies.md
+      - Ошибки: errors.md
+  - Обёртки:
+      - HTTP-мидлвара (httpx): wraps/httpx.md
+      - Кэширование (caching): wraps/caching.md
+      - Аудит (audit): wraps/audit.md
+markdown_extensions:
+  - admonition
+  - abbr
+  - tables
+  - pymdownx.highlight:
+      anchor_linenums: true
+      pygments_style: monokai
+      noclasses: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+extra_css:
+  - stylesheets/extra.css
+  - stylesheets/monokai.css

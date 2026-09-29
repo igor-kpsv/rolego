@@ -210,6 +210,94 @@ func TestErrorNotCached(t *testing.T) {
 	}
 }
 
+func TestVersionInvalidatesEntries(t *testing.T) {
+	inner, rr := newChecker()
+	dataVersion := uint64(0)
+	w := caching.Wrap(inner, caching.WithVersion(func() uint64 { return dataVersion }))
+	res := door{id: 7}
+
+	for i := 0; i < 2; i++ {
+		if _, err := w.Check(context.Background(), "alice", res, openDoor); err != nil {
+			t.Fatalf("Check() error = %v", err)
+		}
+	}
+	if rr.calls != 1 {
+		t.Fatalf("резолвер вызван %d раз, want 1 до смены версии", rr.calls)
+	}
+
+	// Изменение данных «снаружи» отражается счётчиком — все записи инвалидируются.
+	dataVersion = 1
+	if _, err := w.Check(context.Background(), "alice", res, openDoor); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if rr.calls != 2 {
+		t.Errorf("резолвер вызван %d раз, want 2 (смена версии инвалидировала запись)", rr.calls)
+	}
+
+	// Стабилизировались на новой версии — снова кэш-хит.
+	if _, err := w.Check(context.Background(), "alice", res, openDoor); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if rr.calls != 2 {
+		t.Errorf("резолвер вызван %d раз, want 2 (версия не менялась — снова хит)", rr.calls)
+	}
+}
+
+func TestInvalidate(t *testing.T) {
+	inner, rr := newChecker()
+	w := caching.Wrap(inner)
+	res := door{id: 7}
+
+	for i := 0; i < 2; i++ {
+		if _, err := w.Check(context.Background(), "alice", res, openDoor); err != nil {
+			t.Fatalf("Check() error = %v", err)
+		}
+	}
+	if rr.calls != 1 {
+		t.Fatalf("резолвер вызван %d раз, want 1 до Invalidate", rr.calls)
+	}
+
+	w.Invalidate("alice", res, openDoor)
+	if _, err := w.Check(context.Background(), "alice", res, openDoor); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if rr.calls != 2 {
+		t.Errorf("резолвер вызван %d раз, want 2 (Invalidate сбросил запись ровно по ключу)", rr.calls)
+	}
+}
+
+func TestInvalidateSubj(t *testing.T) {
+	inner, rr := newChecker()
+	w := caching.Wrap(inner)
+
+	if _, err := w.Check(context.Background(), "alice", door{id: 1}, openDoor); err != nil {
+		t.Fatalf("Check(alice, d1) error = %v", err)
+	}
+	if _, err := w.Check(context.Background(), "alice", door{id: 2}, openDoor); err != nil {
+		t.Fatalf("Check(alice, d2) error = %v", err)
+	}
+	if _, err := w.Check(context.Background(), "bob", door{id: 2}, openDoor); err != nil {
+		t.Fatalf("Check(bob) error = %v", err)
+	}
+	if rr.calls != 3 {
+		t.Fatalf("резолвер вызван %d раз, want 3 до InvalidateSubj", rr.calls)
+	}
+
+	w.InvalidateSubj("alice")
+	if _, err := w.Check(context.Background(), "alice", door{id: 1}, openDoor); err != nil {
+		t.Fatalf("Check(alice, d1) error = %v", err)
+	}
+	if _, err := w.Check(context.Background(), "alice", door{id: 2}, openDoor); err != nil {
+		t.Fatalf("Check(alice, d2) error = %v", err)
+	}
+	if _, err := w.Check(context.Background(), "bob", door{id: 2}, openDoor); err != nil {
+		t.Fatalf("Check(bob) error = %v", err)
+	}
+	if rr.calls != 5 {
+		t.Errorf("резолвер вызван %d раз, want 5 (записи alice пересчитаны, bob — кэш-хит)", rr.calls)
+	}
+}
+
 func TestDelegate(t *testing.T) {
 	inner, _ := newChecker()
 	w := caching.Wrap(inner)

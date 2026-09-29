@@ -98,6 +98,8 @@ handler := httpx.Require(checker, OpenDoor, parse)(next)
 ```go
 cached := caching.Wrap(checker, caching.WithMaxEntries(1000), caching.WithTTL(time.Minute))
 // Ключ (subj, res, perm); ошибочные проверки не кэшируются.
+// Свежесть — тремя рычагами: WithTTL (время), WithVersion (версия данных —
+// авто-инвалидация при смене), Invalidate/InvalidateSubj (точечная отмена).
 ```
 
 ### audit — логирование решений

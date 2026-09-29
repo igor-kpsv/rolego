@@ -1,0 +1,20 @@
+.md-typeset {
+    font-size: 0.6rem; /* было ~0.8rem, стало мельче */
+}
+
+.md-typeset h1 {
+    font-size: 1.6rem;
+}
+
+.md-typeset h2 {
+    font-size: 1.3rem;
+}
+
+.md-typeset h3 {
+    font-size: 1.1rem;
+}
+
+/* если нужно ещё компактнее — уменьши межстрочный интервал и отступы */
+.md-typeset {
+    line-height: 1.5;
+}

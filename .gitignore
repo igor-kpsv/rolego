@@ -6,3 +6,7 @@
 *.out
 coverage.out
 /vendor/
+
+# Документация (mkdocs)
+.docs-venv/
+/site/
