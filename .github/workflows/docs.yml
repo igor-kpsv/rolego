@@ -26,6 +26,7 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           static_site_generator: mkdocs
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
