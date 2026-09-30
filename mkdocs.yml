@@ -41,6 +41,12 @@ nav:
       - HTTP-мидлвара (httpx): wraps/httpx.md
       - Кэширование (caching): wraps/caching.md
       - Аудит (audit): wraps/audit.md
+plugins:
+  - search
+  - macros:
+      render_by_default: false
+      force_render_paths: index.md
+
 markdown_extensions:
   - admonition
   - abbr
@@ -56,3 +62,6 @@ markdown_extensions:
 extra_css:
   - stylesheets/extra.css
   - stylesheets/monokai.css
+
+extra:
+  version: !ENV [ROLEGO_VERSION, "dev"]

@@ -3,6 +3,7 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 [![test status](https://github.com/igor-kpsv/rolego/actions/workflows/tests.yml/badge.svg)](https://github.com/igor-kpsv/rolego/actions)
 [![lint](https://github.com/igor-kpsv/rolego/actions/workflows/lint.yml/badge.svg)](https://github.com/igor-kpsv/rolego/actions)
+[![Go version](https://img.shields.io/github/go-mod/go-version/igor-kpsv/rolego)](https://go.dev)
 
 Встраиваемая ролевая авторизация для Go: права — битовые маски-константы твоего пакета, откуда они берутся — решает твой код поверх твоих данных. Библиотека ничего не хранит и не знает о фреймворке.
 

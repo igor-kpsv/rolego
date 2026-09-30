@@ -1,7 +1,5 @@
 name: docs
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -17,11 +15,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - run: pip install mkdocs-material
+      - run: pip install mkdocs-material mkdocs-macros-plugin
+      - run: |
+          echo "ROLEGO_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)" >> "$GITHUB_ENV"
       - run: mkdocs build --site-dir site
       - uses: actions/upload-pages-artifact@v3
         with:
