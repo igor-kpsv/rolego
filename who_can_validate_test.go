@@ -209,7 +209,7 @@ func TestWhoCanResolverError(t *testing.T) {
 	c, err := New[string, testResource](
 		Type[string, testResource](KindDoor),
 		MapScopes[string, testResource](func(r testResource) []Scope { return r.scopes }),
-		Resolve[string, testResource](errAtResolver{linkErrKind: KindDoor, err: mockErr}),
+		Resolve[string, testResource](errAtResolver{linkErrKind: KindDoor, err: errMock}),
 		WithPolicy[string, testResource](
 			Matrices{KindDoor: {roleA: right1}},
 			NewScopeChain(Level(KindDoor)),
@@ -223,8 +223,8 @@ func TestWhoCanResolverError(t *testing.T) {
 	if got != nil {
 		t.Errorf("WhoCan() = %v, want nil при ошибке резолвера", got)
 	}
-	if !errors.Is(err, mockErr) {
-		t.Errorf("WhoCan() error = %v, want errors.Is(mockErr)", err)
+	if !errors.Is(err, errMock) {
+		t.Errorf("WhoCan() error = %v, want errors.Is(errMock)", err)
 	}
 }
 

@@ -201,7 +201,7 @@ func TestCheckResolverError(t *testing.T) {
 			c, err := New[string, testResource](
 				Type[string, testResource](KindDoor),
 				MapScopes[string, testResource](func(r testResource) []Scope { return r.scopes }),
-				Resolve[string, testResource](errAtResolver{linkErrKind: tt.linkErrKind, err: mockErr}),
+				Resolve[string, testResource](errAtResolver{linkErrKind: tt.linkErrKind, err: errMock}),
 				WithPolicy[string, testResource](
 					Matrices{KindDoor: {roleA: right1}},
 					NewScopeChain(Level(KindDoor), Level(KindRoom)),
@@ -214,8 +214,8 @@ func TestCheckResolverError(t *testing.T) {
 			if got != Deny {
 				t.Errorf("Check() = %v, want Deny при ошибке резолвера", got)
 			}
-			if !errors.Is(err, mockErr) {
-				t.Errorf("Check() error = %v, want %v (сверка errors.Is)", err, mockErr)
+			if !errors.Is(err, errMock) {
+				t.Errorf("Check() error = %v, want %v (сверка errors.Is)", err, errMock)
 			}
 		})
 	}

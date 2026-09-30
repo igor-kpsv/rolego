@@ -64,7 +64,7 @@ func TestScopeChainKindsCopy(t *testing.T) {
 	c := NewScopeChain(Level(kindA), Level(kindB))
 	got := c.Kinds()
 	got[0] = kindC
-	got = append(got, kindC)
+	_ = append(got, kindC)
 
 	if want := []Kind{kindA, kindB}; !kindsEqual(c.Kinds(), want) {
 		t.Errorf("цепочка изменилась: Kinds() = %v, want %v", c.Kinds(), want)

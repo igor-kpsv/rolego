@@ -34,7 +34,7 @@ func TestAllowsResolverError(t *testing.T) {
 	c, err := New[string, testResource](
 		Type[string, testResource](KindDoor),
 		MapScopes[string, testResource](func(r testResource) []Scope { return r.scopes }),
-		Resolve[string, testResource](errAtResolver{linkErrKind: KindDoor, err: mockErr}),
+		Resolve[string, testResource](errAtResolver{linkErrKind: KindDoor, err: errMock}),
 		WithPolicy[string, testResource](
 			Matrices{KindDoor: {roleA: right1}},
 			NewScopeChain(Level(KindDoor)),

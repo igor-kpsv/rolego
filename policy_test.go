@@ -21,11 +21,11 @@ func (m *mock) Allow(context.Context, string, Perm, string) (Decision, error) {
 // constPolicy возвращает политику, всегда выдающую заданное решение.
 func constPolicy(dec Decision) *mock { return &mock{dec: dec} }
 
-// mockErr — общая тестовая ошибка для сверки через errors.Is.
-var mockErr = errors.New("rolego: mock error")
+// errMock — общая тестовая ошибка для сверки через errors.Is.
+var errMock = errors.New("rolego: mock error")
 
 // errPolicy возвращает политику, всегда выдающую ошибку.
-func errPolicy() *mock { return &mock{dec: Deny, err: mockErr} }
+func errPolicy() *mock { return &mock{dec: Deny, err: errMock} }
 
 func TestAllOf(t *testing.T) {
 	for _, tt := range []struct {
@@ -71,7 +71,7 @@ func TestAllOfShortCircuit(t *testing.T) {
 }
 
 func TestAllOfErrorPropagates(t *testing.T) {
-	wantErr := mockErr
+	wantErr := errMock
 	ps := []Policy[string, string]{errPolicy(), constPolicy(Allow)}
 	got, err := AllOf(ps...).Allow(context.Background(), "s", 1, "r")
 	if got != Deny || !errors.Is(err, wantErr) {
@@ -123,7 +123,7 @@ func TestAnyShortCircuit(t *testing.T) {
 }
 
 func TestAnyErrorPropagates(t *testing.T) {
-	wantErr := mockErr
+	wantErr := errMock
 	ps := []Policy[string, string]{errPolicy(), constPolicy(Allow)}
 	got, err := Any(ps...).Allow(context.Background(), "s", 1, "r")
 	if got != Deny || !errors.Is(err, wantErr) {
@@ -195,7 +195,7 @@ func TestExceptDeniedAllowStops(t *testing.T) {
 }
 
 func TestExceptErrorPropagates(t *testing.T) {
-	wantErr := mockErr
+	wantErr := errMock
 
 	t.Run("ошибка в base", func(t *testing.T) {
 		got, err := Except[string, string](errPolicy(), constPolicy(Deny)).Allow(context.Background(), "s", 1, "r")

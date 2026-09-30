@@ -67,8 +67,8 @@ var (
 	_ rolego.Resolver[string, doorResource] = ctxResolver{}
 )
 
-// storeErr — модельная ошибка сбоя проверки.
-var storeErr = errors.New("roles store is down")
+// errStore — модельная ошибка сбоя проверки.
+var errStore = errors.New("roles store is down")
 
 // newChecker собирает Checker сценария «ключ — дверь» с заданным резолвером.
 func newChecker(res rolego.Resolver[string, doorResource]) *rolego.Checker[string, doorResource] {
@@ -101,7 +101,7 @@ func TestRequire(t *testing.T) {
 	})
 
 	keyCard := newChecker(holderResolver{"alice": roleKeyholder})
-	broken := newChecker(failingResolver{err: storeErr})
+	broken := newChecker(failingResolver{err: errStore})
 
 	parseErrText := "no subject"
 	parseErr := func(*http.Request) (string, doorResource, error) {
