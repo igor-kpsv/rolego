@@ -23,10 +23,6 @@ jobs:
           python-version: "3.x"
       - run: pip install mkdocs-material
       - run: mkdocs build --site-dir site
-      - uses: actions/configure-pages@v6
-        with:
-          static_site_generator: mkdocs
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
