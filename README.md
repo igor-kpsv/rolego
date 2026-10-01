@@ -15,7 +15,10 @@
 - **Мы ничего не храним.** Роли субъекта вычисляет приложение из своих данных (membership, ownership, правила); в библиотеке нет ни таблиц, ни миграций.
 - **Скоупы без доменных имён.** Ось уровней (`workspace → project → issue` или `tenant → team`) и правило комбинации (`Nearest`/`Union`) объявляешь ты. Ядро знает только числа.
 - **Валидация на старте.** `Validate()` обходит политику и падает на противоречиях до того, как они ужаснут живого пользователя.
-- **Обёртки для продакшена** — `httpx` (middleware), `caching`, `audit`: в отдельных подпакетах, ядро их не знает.
+- **Иерархия ролей.** `WithHierarchy` разворачивает старшинство «менеджер включает права редактора» транзитивно — без дублирования прав в матрицах.
+- **Ролевой запрос без права.** `RolesFor` отвечает «какие роли у субъекта на ресурсе?» — без простановочных битов в матрице.
+- **Строки из унаследованной БД.** `Registry` конвертит строковые права `<домен>.<действие>` в биты без миграции схемы.
+- **Обёртки для продакшена** — `httpx` (middleware), `audit`: в отдельных подпакетах, ядро их не знает.
 
 ## Быстрый старт
 
@@ -83,8 +86,10 @@ if !decision.Allow() {
 - **Матрицы** — `Matrix map[Role]Perm`, `Matrices map[Kind]Matrix`; оценка через `Perms`/`Allow`.
 - **Цепочка** — `ScopeChain` через `NewScopeChain(Level(kind), Combine(rule))`, правила `Nearest`/`Union`.
 - **Комбинаторы политик** — `AllOf`, `Any`, `Except` (deny-wins), `Predicate`, `Single`.
-- **Checker[S, R]** — `Type`/`MapScopes`/`Resolve`/`WithPolicy` (опции `New`), методы `Check`, `WhoCan` (обратный выбор: кто из кандидатов имеет право), `Validate`, `Allows` (bool-обёртка: ошибка трактуется как Deny).
-- **Ошибки** — sentinel-значения (`ErrZeroPerm`, `ErrNilResolver`, `ErrEmptyChain`, …); сверяются через `errors.Is`, несколько противоречий `Validate` объединяет через `errors.Join`.
+- **Checker[S, R]** — `Type`/`MapScopes`/`Resolve`/`WithPolicy`/`WithHierarchy` (опции `New`), методы `Check`, `Allows` (bool-обёртка: ошибка трактуется как Deny), `WhoCan` (обратный выбор: кто из кандидатов имеет право), `RolesFor` (маска ролей субъекта на ресурсе без проверки права), `Validate`.
+- **Иерархия ролей** — `Hierarchy map[Role]Role` («роль → родительские роли») + опция `WithHierarchy`: права предков транзитивно добавляются дочерним ролям в каждой матрице; цикл — ошибка `New`.
+- **Реестр строк** — `Registry[T ~uint64]` (для `Perm` или `Role`): `Register` (явный бит), `Next` (авто-бит), `Parse`/`MustParse` (строка → бит), `Name` (бит → строка, для аудита).
+- **Ошибки** — sentinel-значения (`ErrZeroPerm`, `ErrNilResolver`, `ErrEmptyChain`, `ErrHierarchyCycle`, …); сверяются через `errors.Is`, несколько противоречий `Validate` объединяет через `errors.Join`.
 
 ## Подпакеты
 
@@ -96,14 +101,7 @@ handler := httpx.Require(checker, OpenDoor, parse)(next)
 // 400 — ошибка parse, 403 — Deny, 500 — ошибка проверки
 ```
 
-### caching — кэш решений
-
-```go
-cached := caching.Wrap(checker, caching.WithMaxEntries(1000), caching.WithTTL(time.Minute))
-// Ключ (subj, res, perm); ошибочные проверки не кэшируются.
-// Свежесть — тремя рычагами: WithTTL (время), WithVersion (версия данных —
-// авто-инвалидация при смене), Invalidate/InvalidateSubj (точечная отмена).
-```
+`Require` — обычная `func(http.Handler) http.Handler`, поэтому подключается к Chi/Gin/Echo/Fiber штатными мостами фреймворка (см. [документацию](docs/wraps/frameworks.md)).
 
 ### audit — логирование решений
 

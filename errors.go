@@ -22,4 +22,11 @@ var (
 
 	// ErrZeroPerm — запрошенное право равно нулю.
 	ErrZeroPerm = errors.New("rolego: zero perm requested")
+
+	// ErrHierarchyCycle — граф иерархии ролей содержит цикл (роль включает
+	// себя напрямую или через цепочку предков).
+	ErrHierarchyCycle = errors.New("rolego: cycle in role hierarchy")
+
+	// ErrUnknownRegistryName — строковое имя не зарегистрировано в Registry.
+	ErrUnknownRegistryName = errors.New("rolego: unknown registry name")
 )

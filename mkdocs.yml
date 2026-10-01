@@ -37,10 +37,11 @@ nav:
       - Скоупы и цепочки: scopes.md
       - Комбинирование политик: policies.md
       - Ошибки: errors.md
+      - Строки из унаследованной БД (Registry): registry.md
   - Обёртки:
       - HTTP-мидлвара (httpx): wraps/httpx.md
-      - Кэширование (caching): wraps/caching.md
       - Аудит (audit): wraps/audit.md
+      - Подключение к фреймворкам: wraps/frameworks.md
 plugins:
   - search
   - macros:

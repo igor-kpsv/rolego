@@ -13,14 +13,18 @@
 
 ```go
 var (
-	ErrEmptyChain       // ось ScopeChain пуста — нет ни одного звена
-	ErrInvalidChainRule // правило комбинации не Nearest и не Union
-	ErrNoMatrixForKind  // в Matrices нет матрицы для Kind из Type
-	ErrNilResolver      // резолвер равен nil
-	ErrNilMapScopes     // экстрактор MapScopes равен nil
-	ErrZeroPerm         // запрошенное право равно нулю
+	ErrEmptyChain          // ось ScopeChain пуста — нет ни одного звена
+	ErrInvalidChainRule    // правило комбинации не Nearest и не Union
+	ErrNoMatrixForKind     // в Matrices нет матрицы для Kind из Type
+	ErrNilResolver         // резолвер равен nil
+	ErrNilMapScopes        // экстрактор MapScopes равен nil
+	ErrZeroPerm            // запрошенное право равно нулю
+	ErrHierarchyCycle      // граф иерархии ролей содержит цикл
+	ErrUnknownRegistryName // строка не зарегистрирована в Registry
 )
 ```
+
+Первые шесть — рантайм `Check`/сборка `Validate`; `ErrHierarchyCycle` присылает `New` при циклической иерархии (раздел ниже); `ErrUnknownRegistryName` — реестр строк↔битов (ниже).
 
 ```go
 decision, err := checker.Check(ctx, user, doc, 0)
@@ -72,4 +76,41 @@ if errors.Is(err, rolego.ErrEmptyChain) && errors.Is(err, rolego.ErrNoMatrixForK
 | резолвер не nil | `ErrNilResolver` |
 | экстрактор не nil | `ErrNilMapScopes` |
 
-Дальше: обёртки для продакшена — [httpx](wraps/httpx.md), [caching](wraps/caching.md), [audit](wraps/audit.md).
+Обрати внимание: `Validate` **не проверяет иерархию ролей**. Цикл в ней `New` ловит раньше, на этапе разворачивания — см. ниже.
+
+## Ошибки сборки: цикл в иерархии
+
+Иерархия ролей ([`WithHierarchy`](roles.md)) разворачивается в права при сборке `Checker`. Если граф зацикливается — роль включает себя напрямую или через цепочку предков, — собрать `Checker` нельзя:
+
+```go
+checker, err := rolego.New[string, Document](
+	// ...Type, MapScopes, Resolve, WithPolicy...
+	rolego.WithHierarchy[string, Document](rolego.Hierarchy{
+		RoleEditor:  RoleManager, // редактор включает менеджера...
+		RoleManager: RoleEditor,  // ...а менеджер — редактора: цикл
+	}),
+)
+if checker != nil {
+	// собрать не удалось: checker == nil
+}
+if errors.Is(err, rolego.ErrHierarchyCycle) {
+	// цикл в иерархии — политику нужно чинить в коде
+}
+```
+
+Ошибка приходит **из `New`**, а не из `Validate` и не из `Check`: пока сборка не развернула граф, цикла в матрицах нет. `errors.Is(err, rolego.ErrHierarchyCycle)` срабатывает и здесь, и на любой обёртке этого `err`.
+
+## Ошибки реестра: неизвестная строка
+
+`Registry` (строки из унаследованной БД ↔ биты, подробнее [Registry](registry.md)) возвращает ошибку только в одном месте — `Parse` на незарегистрированном имени:
+
+```go
+v, err := rights.Parse("documents.unknown")
+if errors.Is(err, rolego.ErrUnknownRegistryName) {
+	// строки в реестре нет — типовой путь: имя опечатано, или прав в БД не бывает
+}
+```
+
+Для строк, которые обязаны существовать, есть `MustParse` — паникует вместо возврата ошибки. У `Next` и `Register` ошибка-вернута нет по контракту: дубликат имени или бита — паника, это ошибка программиста, а не данных.
+
+Дальше: обёртки для продакшена — [httpx](wraps/httpx.md), [audit](wraps/audit.md), мосты к [веб-фреймворкам](wraps/frameworks.md).

@@ -56,3 +56,59 @@ func ExampleChecker_Check() {
 	// true
 	// false
 }
+
+func ExampleChecker_RolesFor() {
+	c, err := New[string, doorResource](
+		Type[string, doorResource](KindDoor),
+		MapScopes[string, doorResource](func(d doorResource) []Scope { return d.scopes }),
+		Resolve[string, doorResource](holderResolver{"alice": RoleKeyholder}),
+		WithPolicy[string, doorResource](
+			Matrices{KindDoor: {RoleKeyholder: OpenDoor}},
+			NewScopeChain(Level(KindDoor)),
+		),
+	)
+	if err != nil {
+		panic(err)
+	}
+	door := doorResource{scopes: []Scope{{Kind: KindDoor, ID: 7}}}
+
+	// «Какие роли у алисы на этой двери?» — без проверки конкретного права.
+	roles, err := c.RolesFor(context.Background(), "alice", door)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(roles.Has(RoleKeyholder))
+
+	// Output:
+	// true
+}
+
+func ExampleRegistry() {
+	const (
+		Read Perm = 1 << iota
+		Write
+		Delete
+	)
+
+	// Строковые права из унаследованной БД: «documents.view» и т.п.
+	reg := new(Registry[Perm])
+	reg.Register("documents.view", Read)
+	reg.Register("documents.edit", Read|Write)
+	reg.Register("documents.delete", Delete)
+
+	v, err := reg.Parse("documents.edit")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(v == Read|Write)
+
+	fmt.Println(reg.MustParse("documents.view") == Read)
+
+	name, ok := reg.Name(Delete)
+	fmt.Println(name, ok)
+
+	// Output:
+	// true
+	// true
+	// documents.delete true
+}

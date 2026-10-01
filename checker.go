@@ -30,12 +30,15 @@ type config[S, R any] struct {
 	resolver  Resolver[S, R]
 	mats      Matrices
 	chain     ScopeChain
+	hierarchy Hierarchy
 }
 
 // New собирает Checker, применяя опции слева направо; при ошибке любой опции
-// возвращает nil и эту ошибку. nil-опция в списке молча пропускается. Валидация
-// политики (полнота матриц, ось, nil резолвер/экстрактор) выполняется на Этапе 6
-// в Validate, здесь не проводится.
+// возвращает nil и эту ошибку. nil-опция в списке молча пропускается. Если
+// задана WithHierarchy, после опций иерархия разворачивается в копии матриц
+// (expandHierarchy); ошибка этого шага — например ErrHierarchyCycle при цикле —
+// тоже возвращается как (nil, err). Валидация политики (полнота матриц, ось,
+// nil резолвер/экстрактор) выполняется на Этапе 6 в Validate, здесь не проводится.
 func New[S, R any](opts ...Option[S, R]) (*Checker[S, R], error) {
 	var cfg config[S, R]
 	for _, opt := range opts {
@@ -46,11 +49,19 @@ func New[S, R any](opts ...Option[S, R]) (*Checker[S, R], error) {
 			return nil, err
 		}
 	}
+	mats := cfg.mats
+	if len(cfg.hierarchy) > 0 {
+		var err error
+		mats, err = expandHierarchy(cfg.mats, cfg.hierarchy)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &Checker[S, R]{
 		kind:      cfg.kind,
 		mapScopes: cfg.mapScopes,
 		resolver:  cfg.resolver,
-		mats:      cfg.mats,
+		mats:      mats,
 		chain:     cfg.chain,
 	}, nil
 }
@@ -105,9 +116,41 @@ func (c *Checker[S, R]) Check(ctx context.Context, subj S, res R, perm Perm) (De
 		return Deny, fmt.Errorf("%w: %d", ErrZeroPerm, perm)
 	}
 
+	merged, err := c.rolesFor(ctx, subj, res)
+	if err != nil {
+		return Deny, err
+	}
+
+	if c.mats[c.kind].Allow(merged, perm) {
+		return Allow, nil
+	}
+	return Deny, nil
+}
+
+// RolesFor возвращает маску ролей субъекта subj на ресурсе res: тот же конвейер,
+// что в Check (MapScopes → RolesAt по звеньям → combine по правилу оси), но без
+// сверки с матрицей прав. Удобно спрашивать «какие роли у субъекта на этом
+// ресурсе?» (владелец, менеджер скоупа), не заводя простановочные биты в матрице.
+// Ошибка резолвера — (RolesOf(0), err); нет звеньев или пустые маски — пустое
+// множество ролей, ошибки нет.
+//
+// Иерархия ролей (WithHierarchy) в возвращаемой маске не раскрывается: она
+// расширяет только матрицы прав при сборке Checker и не влияет на RolesAt;
+// маска — ровно то, что выдал резолвер на звеньях ресурса.
+func (c *Checker[S, R]) RolesFor(ctx context.Context, subj S, res R) (Roles, error) {
+	merged, err := c.rolesFor(ctx, subj, res)
+	if err != nil {
+		return Roles{}, err
+	}
+	return merged, nil
+}
+
+// rolesFor — общая часть Check и RolesFor: звенья ресурса от MapScopes → маска
+// ролей на каждом звене от резолвера → объединение масок по правилу оси.
+func (c *Checker[S, R]) rolesFor(ctx context.Context, subj S, res R) (Roles, error) {
 	scopes := c.mapScopes(res)
 	if len(scopes) == 0 {
-		return Deny, nil
+		return Roles{}, nil
 	}
 
 	// Звенья от MapScopes идут от корня (индекс 0) к самому ресурсу (последний).
@@ -120,20 +163,16 @@ func (c *Checker[S, R]) Check(ctx context.Context, subj S, res R, perm Perm) (De
 		depth := len(scopes) - 1 - j
 		roles, err := c.resolver.RolesAt(ctx, subj, Link{Scope: scope, Kind: scope.Kind, Depth: depth})
 		if err != nil {
-			return Deny, err
+			return Roles{}, err
 		}
 		masks[depth] = roles
 	}
 
 	merged, ok := combine(c.chain.Rule(), masks)
 	if !ok {
-		return Deny, nil
+		return Roles{}, nil
 	}
-
-	if c.mats[c.kind].Allow(merged, perm) {
-		return Allow, nil
-	}
-	return Deny, nil
+	return merged, nil
 }
 
 // Validate проверяет целостность политики: матрица для c.kind

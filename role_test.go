@@ -12,6 +12,11 @@ const (
 
 const allRoles = roleA | roleB | roleC | roleD
 
+// roleManager — роль-«менеджер», объявляемая только в иерархии (WithHierarchy):
+// собственной записи в матрицах у неё нет, права она получает от предков.
+// Отдельный бит за пределами roleA–roleD.
+const roleManager Role = 1 << 4
+
 func TestHas(t *testing.T) {
 	subj := RolesOf(roleA | roleC)
 
