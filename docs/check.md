@@ -68,6 +68,34 @@ decision, err := checker.Check(ctx, user, doc, PermRead|PermWrite)
 
 Если нужен именно конъюнктивный смысл («читать и писать одновременно»), проверяй биты по отдельности двумя `Check`.
 
+## Персональные права (гранты)
+
+Матрица статична: «роль → права». Но у субъекта бывают **персональные** права поверх системной роли — таблица в БД, редактируемая через API. Синтетическая роль под каждую комбинацию грантов нежизнеспособна: комбинаций много, всё меняется динамически.
+
+Rolego решает это отдельным каналом прав: резолвер возвращает `Resolved{Grants}` — маску `Perm`, которая добавляется к правам ролей по OR:
+
+```go
+type Resolved struct {
+	Roles  Roles
+	Grants Perm // персональные права субъекта на звене; ноль — грантов нет
+}
+
+func (r personalRights) RolesAt(_ context.Context, subj string, res Document, _ rolego.Link) (rolego.Resolved, error) {
+	return rolego.Resolved{
+		Roles:  rolego.RolesOf(r.base[subj]), // системная роль
+		Grants: r.extra[subj],                // персональные права из БД
+	}, nil
+}
+```
+
+Грант — «что тебе можно дополнительно», а не «кто ты»: он не требует роли, не выписывается в матрице и не порождает запись в `RolesFor`. Правила:
+
+- **Гранты OR-ятся по всем звеньям оси**, независимо от правила комбинации ролей (`Nearest`/`Union`): персональные права — аддитивная надбавка, а не «роль, которую нужно найти на самом глубоком звене».
+- Итоговое решение: `(права ролей | гранты) & perm != 0` — как и в `Matrix.Allow`, «хотя бы один бит».
+- **Грант без роли работает**: резолвер вернул только `Grants` — `Check` по этому праву даёт `Allow`.
+
+**Профит:** системная роль и пер-персональные права живут раздельно — матрица не разрастается под комбинации грантов, и ничего не мутируется на запрос.
+
 ## Правило «пусто → Deny»
 
 Несколько штатных ситуаций дают `Deny` **без ошибки** — это не сбой, а политика «нет данных — доступа нет»:
@@ -151,14 +179,14 @@ type failResolver struct {
 	fail bool
 }
 
-func (r failResolver) RolesAt(_ context.Context, subj string, _ rolego.Link) (rolego.Roles, error) {
+func (r failResolver) RolesAt(_ context.Context, subj string, _ Document, _ rolego.Link) (rolego.Resolved, error) {
 	if r.fail {
-		return rolego.RolesOf(0), errors.New("хранилище ролей недоступно")
+		return rolego.Resolved{}, errors.New("хранилище ролей недоступно")
 	}
 	if subj == "alice" {
-		return rolego.RolesOf(RoleEditor), nil
+		return rolego.Resolved{Roles: rolego.RolesOf(RoleEditor)}, nil
 	}
-	return rolego.RolesOf(RoleViewer), nil
+	return rolego.Resolved{Roles: rolego.RolesOf(RoleViewer)}, nil
 }
 
 func main() {
@@ -219,12 +247,49 @@ func main() {
 
 ## Когда `Deny`, а когда ошибка
 
-| Ситуация | Что возвращается |
-|---|---|
-| `perm == 0` | `(Deny, rolego.ErrZeroPerm)` |
-| у ресурса нет звеньев | `(Deny, nil)` |
-| итоговая маска ролей пуста | `(Deny, nil)` |
-| упал резолвер | `(Deny, err)` — ошибка резолвера |
-| право не выписано в матрице | `(Deny, nil)` |
+| Ситуация | Что возвращается | Причина (`CheckResult`) |
+|---|---|---|
+| `perm == 0` | `(Deny, rolego.ErrZeroPerm)` | `DenyReasonNoPerm` |
+| у ресурса нет звеньев | `(Deny, nil)` | `DenyReasonNoRoles` |
+| итоговая маска ролей пуста, грантов нет | `(Deny, nil)` | `DenyReasonNoRoles` |
+| упал резолвер | `(Deny, err)` — ошибка резолвера | незначима (сбой, а не политика) |
+| право не выписано (роли или гранты есть) | `(Deny, nil)` | `DenyReasonNoPerm` |
+
+## Причины отказа: `CheckResult`
+
+`Check` возвращает `Deny` без различения причин. Для разных ответов API — «403 нет доступа к ресурсу» против «403 недостаточно прав» — есть `CheckResult`: тот же `Check`, но с причиной:
+
+```go
+type DenyReason uint8
+
+const (
+	DenyReasonNoRoles DenyReason = iota // ролей и грантов нет — «нет доступа к ресурсу»
+	DenyReasonNoPerm                    // роли/гранты есть, право не выписано — «недостаточно прав»
+)
+
+type Result struct {
+	Decision Decision
+	Reason   DenyReason // смысл имеет только при Deny
+}
+
+func (c *Checker[S, R]) CheckResult(ctx context.Context, subj S, res R, perm Perm) (Result, error)
+```
+
+```go
+r, err := checker.CheckResult(ctx, user, doc, PermWrite)
+if err != nil {
+	return 500 // сбой резолвера — решение не выносилось
+}
+switch {
+case r.Decision.Allow():
+	return 200
+case r.Reason == rolego.DenyReasonNoRoles:
+	return 403 // «нет доступа к ресурсу»
+default:
+	return 403 // «недостаточно прав»
+}
+```
+
+`Check` — тонкая обёртка над `CheckResult`, поэтому политика не дублируется: `deny`-причины различимы только через `CheckResult`, остальные вызовы не меняются.
 
 Дальше: обратный вопрос «кто из списка может действие?» — [Кто имеет право (WhoCan)](who-can.md).

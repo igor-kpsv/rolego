@@ -73,6 +73,34 @@ app.Use(adaptor.HTTPHandler(httpx.Require(checker, PermWrite, parse)(
 
 Если маршруту нужен сам `*fiber.Ctx` (а не http-обёртка), проще проверить право собственным хендлером: `httpx.Require` ничем не волшебен — `checker.Check(r.Context(), subj, res, perm)` доступен для вызова из любого кода.
 
+## fasthttp (и любой собственный сервер) — прямой вызов
+
+`httpx.Require` работает только с `net/http`; адаптеров под `fasthttp` в библиотеке нет — и не нужно: готовый адаптер тащил бы чужие зависимости в подпакет ради glue. Суть мидлвари одна, и для собственного сервера это обычный вызов `Check` в начале обработки:
+
+```go
+var handler fasthttp.RequestHandler = func(fctx *fasthttp.RequestCtx) {
+	subj, res, err := parse(fctx) // твой парсер (subj, res) из запроса
+	if err != nil {
+		fctx.SetStatusCode(fasthttp.StatusBadRequest) // как httpx.Require: 400
+		return
+	}
+	decision, err := checker.Check(context.Background(), subj, res, PermWrite)
+	if err != nil {
+		fctx.SetStatusCode(fasthttp.StatusInternalServerError) // сбой, а не отказ: 500
+		return
+	}
+	if !decision.Allow() {
+		fctx.SetStatusCode(fasthttp.StatusForbidden) // 403
+		return
+	}
+	// право есть — продолжаем обработку
+}
+
+server := &fasthttp.Server{Handler: handler}
+```
+
+Семантика статусов — та же, что у `httpx.Require`: 400 (парсер), 500 (сбой проверки), 403 (`Deny`). Если хочется различать причины `Deny` (например, «403 нет доступа» vs «403 недостаточно прав») — используй [`CheckResult`](../check.md) вместо `Check`.
+
 ## Общий приём
 
 Любой фреймворк, у которого нет готового моста, обслуживается одним и тем же фиксированным шаблоном: отдай мидлваре `http.Handler`, который на `Allow` продолжает цепочку фреймворка (Chi/Echo — штатно, Gin — `c.Next()`, Fiber — через `adaptor`). Это 5–6 строк glue в потребительском коде; перекладывать их в библиотеку нет причины — реализации фреймворков живут чужие релизные циклы, а свойство rolego «ноль внешних зависимостей» стоит дороже.

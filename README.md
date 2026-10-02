@@ -18,6 +18,8 @@
 - **Иерархия ролей.** `WithHierarchy` разворачивает старшинство «менеджер включает права редактора» транзитивно — без дублирования прав в матрицах.
 - **Ролевой запрос без права.** `RolesFor` отвечает «какие роли у субъекта на ресурсе?» — без простановочных битов в матрице.
 - **Строки из унаследованной БД.** `Registry` конвертит строковые права `<домен>.<действие>` в биты без миграции схемы.
+- **Резолвер работает с самим ресурсом.** `RolesAt` получает `res R`, а не только числовую метку звена — роли можно считать из любого поля ресурса (хоть UUID). Вместе с ролями резолвер возвращает персональные права (`Resolved{Grants}`) — аддитивная надбавка поверх матрицы без синтетических ролей.
+- **Причина отказа различима.** `CheckResult` отличает «нет доступа к ресурсу» от «недостаточно прав» — разные ответы API без дублирования политики в вызывающем коде.
 - **Обёртки для продакшена** — `httpx` (middleware), `audit`: в отдельных подпакетах, ядро их не знает.
 
 ## Быстрый старт
@@ -55,7 +57,7 @@ checker, err := rolego.New[string, Document](
 	rolego.MapScopes[string, Document](func(d Document) []rolego.Scope {
 		return []rolego.Scope{{Kind: KindDocument, ID: d.ID}}
 	}),
-	rolego.Resolve[string, Document](myResolver), // RolesAt(ctx, subj, link) (rolego.Roles, error)
+	rolego.Resolve[string, Document](myResolver), // RolesAt(ctx, subj, res, link) (rolego.Resolved, error)
 	rolego.WithPolicy[string, Document](perms, chain),
 )
 if err != nil {
@@ -86,7 +88,8 @@ if !decision.Allow() {
 - **Матрицы** — `Matrix map[Role]Perm`, `Matrices map[Kind]Matrix`; оценка через `Perms`/`Allow`.
 - **Цепочка** — `ScopeChain` через `NewScopeChain(Level(kind), Combine(rule))`, правила `Nearest`/`Union`.
 - **Комбинаторы политик** — `AllOf`, `Any`, `Except` (deny-wins), `Predicate`, `Single`.
-- **Checker[S, R]** — `Type`/`MapScopes`/`Resolve`/`WithPolicy`/`WithHierarchy` (опции `New`), методы `Check`, `Allows` (bool-обёртка: ошибка трактуется как Deny), `WhoCan` (обратный выбор: кто из кандидатов имеет право), `RolesFor` (маска ролей субъекта на ресурсе без проверки права), `Validate`.
+- **Резолвер** — `Resolver[S, R].RolesAt(ctx, subj, res, link) (Resolved, error)`; `Resolved{Roles Roles, Grants Perm}`: роли субъекта на звене и персональные права (аддитивная надбавка по OR).
+- **Checker[S, R]** — `Type`/`MapScopes`/`Resolve`/`WithPolicy`/`WithHierarchy` (опции `New`), методы `Check`, `CheckResult` (решение + причина отказа `DenyReason`), `Allows` (bool-обёртка: ошибка трактуется как Deny), `WhoCan` (обратный выбор: кто из кандидатов имеет право), `RolesFor` (маска ролей субъекта на ресурсе без проверки права), `Validate`.
 - **Иерархия ролей** — `Hierarchy map[Role]Role` («роль → родительские роли») + опция `WithHierarchy`: права предков транзитивно добавляются дочерним ролям в каждой матрице; цикл — ошибка `New`.
 - **Реестр строк** — `Registry[T ~uint64]` (для `Perm` или `Role`): `Register` (явный бит), `Next` (авто-бит), `Parse`/`MustParse` (строка → бит), `Name` (бит → строка, для аудита).
 - **Ошибки** — sentinel-значения (`ErrZeroPerm`, `ErrNilResolver`, `ErrEmptyChain`, `ErrHierarchyCycle`, …); сверяются через `errors.Is`, несколько противоречий `Validate` объединяет через `errors.Join`.

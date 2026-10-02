@@ -67,8 +67,8 @@ func scopes(d Document) []rolego.Scope {
 
 type members map[string]rolego.Role
 
-func (m members) RolesAt(_ context.Context, subj string, _ rolego.Link) (rolego.Roles, error) {
-	return rolego.RolesOf(m[subj]), nil
+func (m members) RolesAt(_ context.Context, subj string, _ Document, _ rolego.Link) (rolego.Resolved, error) {
+	return rolego.Resolved{Roles: rolego.RolesOf(m[subj])}, nil
 }
 
 func main() {

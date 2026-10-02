@@ -28,19 +28,19 @@ type doorResource struct {
 // двери и только субъектам из карты.
 type holderResolver map[string]rolego.Role
 
-func (r holderResolver) RolesAt(_ context.Context, subj string, link rolego.Link) (rolego.Roles, error) {
+func (r holderResolver) RolesAt(_ context.Context, subj string, _ doorResource, link rolego.Link) (rolego.Resolved, error) {
 	if link.Kind != kindDoor {
-		return rolego.RolesOf(0), nil
+		return rolego.Resolved{}, nil
 	}
-	return rolego.RolesOf(r[subj]), nil
+	return rolego.Resolved{Roles: rolego.RolesOf(r[subj])}, nil
 }
 
 // failingResolver — резолвер со сбоем: любая проверка возвращает ошибку (модель
 // падения хранилища ролей).
 type failingResolver struct{ err error }
 
-func (r failingResolver) RolesAt(context.Context, string, rolego.Link) (rolego.Roles, error) {
-	return rolego.RolesOf(0), r.err
+func (r failingResolver) RolesAt(context.Context, string, doorResource, rolego.Link) (rolego.Resolved, error) {
+	return rolego.Resolved{}, r.err
 }
 
 // ctxMarker — тип ключа контекста для проверки передачи r.Context() в Check.
@@ -50,14 +50,14 @@ type ctxMarker struct{}
 // значение ключа ctxMarker: без него субъект прав не имеет.
 type ctxResolver struct{}
 
-func (ctxResolver) RolesAt(ctx context.Context, _ string, link rolego.Link) (rolego.Roles, error) {
+func (ctxResolver) RolesAt(ctx context.Context, _ string, _ doorResource, link rolego.Link) (rolego.Resolved, error) {
 	if link.Kind != kindDoor {
-		return rolego.RolesOf(0), nil
+		return rolego.Resolved{}, nil
 	}
 	if ctx.Value(ctxMarker{}) != nil {
-		return rolego.RolesOf(roleKeyholder), nil
+		return rolego.Resolved{Roles: rolego.RolesOf(roleKeyholder)}, nil
 	}
-	return rolego.RolesOf(0), nil
+	return rolego.Resolved{}, nil
 }
 
 // Компиляционные проверки: все резолверы реализуют rolego.Resolver.

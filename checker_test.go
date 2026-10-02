@@ -31,23 +31,25 @@ type testResource struct {
 // только на звене двери, и только перечисленным субъектам.
 type doorResolver map[string]Role
 
-func (r doorResolver) RolesAt(_ context.Context, subj string, link Link) (Roles, error) {
+func (r doorResolver) RolesAt(_ context.Context, subj string, _ testResource, link Link) (Resolved, error) {
 	if link.Kind != KindDoor {
-		return RolesOf(0), nil
+		return Resolved{}, nil
 	}
-	return RolesOf(r[subj]), nil
+	return Resolved{Roles: RolesOf(r[subj])}, nil
 }
 
-// noneResolver — резолвер, не выдающий ни одной роли ни на одном звене.
+// noneResolver — резолвер, не выдающий ни ролей, ни грантов ни на одном звене.
 type noneResolver struct{}
 
-func (noneResolver) RolesAt(context.Context, string, Link) (Roles, error) { return RolesOf(0), nil }
+func (noneResolver) RolesAt(context.Context, string, testResource, Link) (Resolved, error) {
+	return Resolved{}, nil
+}
 
 // kindResolver — резолвер «роль по типу звена из справочника».
 type kindResolver map[Kind]Role
 
-func (r kindResolver) RolesAt(_ context.Context, _ string, link Link) (Roles, error) {
-	return RolesOf(r[link.Kind]), nil
+func (r kindResolver) RolesAt(_ context.Context, _ string, _ testResource, link Link) (Resolved, error) {
+	return Resolved{Roles: RolesOf(r[link.Kind])}, nil
 }
 
 // recordingResolver — резолвер-регистратор: запоминает переданные звенья и на
@@ -56,12 +58,12 @@ type recordingResolver struct {
 	links []Link
 }
 
-func (r *recordingResolver) RolesAt(_ context.Context, _ string, link Link) (Roles, error) {
+func (r *recordingResolver) RolesAt(_ context.Context, _ string, _ testResource, link Link) (Resolved, error) {
 	r.links = append(r.links, link)
 	if link.Kind == KindDoor {
-		return RolesOf(RoleAuthor), nil
+		return Resolved{Roles: RolesOf(RoleAuthor)}, nil
 	}
-	return RolesOf(0), nil
+	return Resolved{}, nil
 }
 
 // errAtResolver — резолвер с заданной ошибкой на звене типа linkErrKind; на
@@ -71,11 +73,11 @@ type errAtResolver struct {
 	err         error
 }
 
-func (r errAtResolver) RolesAt(_ context.Context, _ string, link Link) (Roles, error) {
+func (r errAtResolver) RolesAt(_ context.Context, _ string, _ testResource, link Link) (Resolved, error) {
 	if link.Kind == r.linkErrKind {
-		return RolesOf(0), r.err
+		return Resolved{}, r.err
 	}
-	return RolesOf(roleA), nil
+	return Resolved{Roles: RolesOf(roleA)}, nil
 }
 
 // Компиляционные проверки: все резолверы реализуют интерфейс Resolver.

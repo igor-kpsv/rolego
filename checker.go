@@ -108,28 +108,48 @@ func WithPolicy[S, R any](mats Matrices, chain ScopeChain) Option[S, R] {
 
 // Check проверяет право perm субъекта subj на ресурс res:
 // MapScopes → звенья, RolesAt на каждом звене (от самого глубокого к корню) →
-// маски, combine по правилу оси → итоговая маска, mats[kind].Allow — решение.
-// perm == 0 — (Deny, ErrZeroPerm); нет звеньев или пустая итоговая маска — Deny;
-// ошибка резолвера — (Deny, err).
+// маски ролей, combine по правилу оси; гранты OR-ятся по всем звеньям. Итог:
+// (Perms(merged) | grantsAll) & perm != 0 — Allow.
+// perm == 0 — (Deny, ErrZeroPerm); нет звеньев, пустые роли и гранты — Deny;
+// ошибка резолвера — (Deny, err). Причину отказа несёт CheckResult.
 func (c *Checker[S, R]) Check(ctx context.Context, subj S, res R, perm Perm) (Decision, error) {
+	r, err := c.CheckResult(ctx, subj, res, perm)
+	return r.Decision, err
+}
+
+// CheckResult — Check с причиной отказа: решение и (при Deny) DenyReason.
+// Порядок логики:
+//
+//  1. perm == 0 → (Deny, ErrZeroPerm), Reason = DenyReasonNoPerm.
+//  2. Ошибка конвейера (резолвер) → (Deny, err), Reason незначим.
+//  3. Роли пусты и грантов нет → (Deny, DenyReasonNoRoles), nil err.
+//  4. effective := mats[kind].Perms(roles) | grants; effective&perm != 0 → Allow.
+//  5. Иначе → (Deny, DenyReasonNoPerm), nil err.
+func (c *Checker[S, R]) CheckResult(ctx context.Context, subj S, res R, perm Perm) (Result, error) {
 	if perm == 0 {
-		return Deny, fmt.Errorf("%w: %d", ErrZeroPerm, perm)
+		return Result{Decision: Deny, Reason: DenyReasonNoPerm}, fmt.Errorf("%w: %d", ErrZeroPerm, perm)
 	}
 
-	merged, err := c.rolesFor(ctx, subj, res)
+	got, err := c.collect(ctx, subj, res)
 	if err != nil {
-		return Deny, err
+		return Result{Decision: Deny}, err
 	}
 
-	if c.mats[c.kind].Allow(merged, perm) {
-		return Allow, nil
+	if got.roles.bits == 0 && got.grants == 0 {
+		return Result{Decision: Deny, Reason: DenyReasonNoRoles}, nil
 	}
-	return Deny, nil
+
+	effective := c.mats[c.kind].Perms(got.roles) | got.grants
+	if effective&perm != 0 {
+		return Result{Decision: Allow}, nil
+	}
+	return Result{Decision: Deny, Reason: DenyReasonNoPerm}, nil
 }
 
 // RolesFor возвращает маску ролей субъекта subj на ресурсе res: тот же конвейер,
 // что в Check (MapScopes → RolesAt по звеньям → combine по правилу оси), но без
-// сверки с матрицей прав. Удобно спрашивать «какие роли у субъекта на этом
+// сверки с матрицей прав и без учёта грантов — персональные права (Resolved.Grants)
+// в возвращаемую маску не входят. Удобно спрашивать «какие роли у субъекта на этом
 // ресурсе?» (владелец, менеджер скоупа), не заводя простановочные биты в матрице.
 // Ошибка резолвера — (RolesOf(0), err); нет звеньев или пустые маски — пустое
 // множество ролей, ошибки нет.
@@ -138,41 +158,54 @@ func (c *Checker[S, R]) Check(ctx context.Context, subj S, res R, perm Perm) (De
 // расширяет только матрицы прав при сборке Checker и не влияет на RolesAt;
 // маска — ровно то, что выдал резолвер на звеньях ресурса.
 func (c *Checker[S, R]) RolesFor(ctx context.Context, subj S, res R) (Roles, error) {
-	merged, err := c.rolesFor(ctx, subj, res)
+	got, err := c.collect(ctx, subj, res)
 	if err != nil {
 		return Roles{}, err
 	}
-	return merged, nil
+	return got.roles, nil
 }
 
-// rolesFor — общая часть Check и RolesFor: звенья ресурса от MapScopes → маска
-// ролей на каждом звене от резолвера → объединение масок по правилу оси.
-func (c *Checker[S, R]) rolesFor(ctx context.Context, subj S, res R) (Roles, error) {
+// scoped — результат общего конвейера проверки: итоговая маска ролей по правилу
+// оси (roles) и суммарные персональные права (grants) — OR по всем звеньям,
+// независимо от правила оси.
+type scoped struct {
+	roles  Roles
+	grants Perm
+}
+
+// collect — общая часть CheckResult и RolesFor: звенья ресурса от MapScopes →
+// маска ролей и гранты на каждом звене от резолвера → объединение ролей по
+// правилу оси; гранты OR-ятся по всем звеньям (аддитивная надбавка к правам
+// ролей) и собираются даже при пустой итоговой маске ролей. Пустой список
+// звеньев — нули. Ошибка резолвера — (scoped{}, err).
+func (c *Checker[S, R]) collect(ctx context.Context, subj S, res R) (scoped, error) {
 	scopes := c.mapScopes(res)
 	if len(scopes) == 0 {
-		return Roles{}, nil
+		return scoped{}, nil
 	}
 
 	// Звенья от MapScopes идут от корня (индекс 0) к самому ресурсу (последний).
 	// depth — позиция звена в оси, где 0 у самого глубокого (ресурса). Маски
 	// укладываем по индексу depth, так что masks[0] — маска ресурса: это соглашение
 	// принимает combine (индекс 0 — самое глубокое звено). Идём от ресурса к корню.
+	var grants Perm
 	masks := make([]Roles, len(scopes))
 	for j := len(scopes) - 1; j >= 0; j-- {
 		scope := scopes[j]
 		depth := len(scopes) - 1 - j
-		roles, err := c.resolver.RolesAt(ctx, subj, Link{Scope: scope, Kind: scope.Kind, Depth: depth})
+		got, err := c.resolver.RolesAt(ctx, subj, res, Link{Scope: scope, Kind: scope.Kind, Depth: depth})
 		if err != nil {
-			return Roles{}, err
+			return scoped{}, err
 		}
-		masks[depth] = roles
+		masks[depth] = got.Roles
+		grants |= got.Grants
 	}
 
 	merged, ok := combine(c.chain.Rule(), masks)
 	if !ok {
-		return Roles{}, nil
+		merged = RolesOf(0)
 	}
-	return merged, nil
+	return scoped{roles: merged, grants: grants}, nil
 }
 
 // Validate проверяет целостность политики: матрица для c.kind

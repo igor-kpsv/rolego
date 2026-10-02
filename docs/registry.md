@@ -116,12 +116,12 @@ func init() {
 // «субъект → роль» переводится в бит реестром roleNames.
 type storedResolver map[string]string
 
-func (r storedResolver) RolesAt(_ context.Context, subj string, _ rolego.Link) (rolego.Roles, error) {
+func (r storedResolver) RolesAt(_ context.Context, subj string, _ Document, _ rolego.Link) (rolego.Resolved, error) {
 	name, ok := r[subj]
 	if !ok {
-		return rolego.RolesOf(0), nil // нет записи — ролей нет
+		return rolego.Resolved{}, nil // нет записи — ролей нет
 	}
-	return rolego.RolesOf(roleNames.MustParse(name)), nil
+	return rolego.Resolved{Roles: rolego.RolesOf(roleNames.MustParse(name))}, nil
 }
 
 func main() {

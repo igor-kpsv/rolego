@@ -23,7 +23,7 @@ type Link struct {
 
 - `Kind` — **что это за тип**. Метка, которую ты объявляешь и сам же используешь везде: «документ», «проект».
 - `Scope` — **конкретное звено**. Пара «тип + номер»: «документ №42», «проект №7». Такой парой резолвер различает звенья одного типа.
-- `Link` — **звено для твоего резолвера**. То же звено, но в упаковке вызова `RolesAt`: `Scope`, `Kind` и глубина `Depth` — позиция звена на оси (0 — сам ресурс).
+- `Link` — **звено для твоего резолвера**. То же звено, но в упаковке вызова `RolesAt`: `Scope`, `Kind` и глубина `Depth` — позиция звена на оси (0 — сам ресурс). Сам ресурс `res R` резолвер получает отдельным параметром.
 
 ## Откуда берётся `Kind` и зачем он в `Scope`
 
@@ -107,16 +107,16 @@ type projectResolver struct {
 	members map[uint64][]string // projectID → участники
 }
 
-func (r projectResolver) RolesAt(_ context.Context, subj string, link rolego.Link) (rolego.Roles, error) {
+func (r projectResolver) RolesAt(_ context.Context, subj string, _ Document, link rolego.Link) (rolego.Resolved, error) {
 	if link.Kind != KindProject {
-		return rolego.RolesOf(0), nil // интересуют только звенья проектов
+		return rolego.Resolved{}, nil // интересуют только звенья проектов
 	}
 	for _, id := range r.members[link.Scope.ID] {
 		if id == subj {
-			return rolego.RolesOf(RoleViewer), nil
+			return rolego.Resolved{Roles: rolego.RolesOf(RoleViewer)}, nil
 		}
 	}
-	return rolego.RolesOf(0), nil
+	return rolego.Resolved{}, nil
 }
 ```
 
@@ -166,8 +166,8 @@ func scopes(d Document) []rolego.Scope {
 // документе одинакова, на любом проекте — своя.
 type kindMembers map[rolego.Kind]rolego.Role
 
-func (m kindMembers) RolesAt(_ context.Context, _ string, link rolego.Link) (rolego.Roles, error) {
-	return rolego.RolesOf(m[link.Kind]), nil
+func (m kindMembers) RolesAt(_ context.Context, _ string, _ Document, link rolego.Link) (rolego.Resolved, error) {
+	return rolego.Resolved{Roles: rolego.RolesOf(m[link.Kind])}, nil
 }
 
 // build собирает Checker с заданным правилом комбинации и резолвером.

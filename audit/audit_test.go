@@ -32,11 +32,11 @@ func doorScopes(d door) []rolego.Scope {
 // субъект получает пустую маску.
 type mapResolver map[string]rolego.Role
 
-func (r mapResolver) RolesAt(_ context.Context, subj string, link rolego.Link) (rolego.Roles, error) {
+func (r mapResolver) RolesAt(_ context.Context, subj string, _ door, link rolego.Link) (rolego.Resolved, error) {
 	if link.Kind == kindDoor {
-		return rolego.RolesOf(r[subj]), nil
+		return rolego.Resolved{Roles: rolego.RolesOf(r[subj])}, nil
 	}
-	return rolego.RolesOf(0), nil
+	return rolego.Resolved{}, nil
 }
 
 // newChecker собирает подлинный checker сценария: alice — держатель ключа.

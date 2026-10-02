@@ -18,11 +18,11 @@ type doorResource struct {
 // субъектам из карты (кто держатель ключа — твои данные).
 type holderResolver map[string]Role
 
-func (r holderResolver) RolesAt(_ context.Context, subj string, link Link) (Roles, error) {
+func (r holderResolver) RolesAt(_ context.Context, subj string, _ doorResource, link Link) (Resolved, error) {
 	if link.Kind != KindDoor {
-		return RolesOf(0), nil
+		return Resolved{}, nil
 	}
-	return RolesOf(r[subj]), nil
+	return Resolved{Roles: RolesOf(r[subj])}, nil
 }
 
 func ExampleChecker_Check() {
